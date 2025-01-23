@@ -15,7 +15,12 @@ from .config import Config
 from .kernel_utils import *
 from .kernel_estimator import KernelEstimator
 from .kernel_calcs import KernelCalcs
+from .nested_kernel_calcs import NestedKernelCalcs
+from .nested_kernel_estimator import NestedKernelEstimator
 from .kernel_matrix import KernelMatrix
+
+from collections import Counter # To count occurrences of numbers in the vector of vectors
+from typing import Set, Tuple # To return multiple values
 
 valid_gklr_params = ["n_jobs", "nystrom", "compression", "ridge_leverage_lambda", "nystrom_sampling"]
 
@@ -37,13 +42,32 @@ class KernelModel:
         self._K_test = None
         self._alpha = None
         self.alpha_shape = None
+        self.lambd = None
+        self.lambd_shape = None # siguiente paso
         self.n_parameters = 0
         self.results = None
+        self.nests = None
+        self.nested = False
 
         if model_params == None:
             self._model_params = None
         else:
             # TODO: Check parameters
+
+            # TODO: Check if the nests exist and in that case, check if they are correctly defined
+
+            if "nests" in model_params:
+                print("Nests found")
+                nests = model_params["nests"]
+                if isinstance(nests, list) and len(nests) > 1 and \
+                    all(isinstance(inner, list) and len(inner) > 0 and 
+                    all(isinstance(num, int) for num in inner) for inner in nests):
+                    print("Nests are correct")
+                    self.nested = True
+                    self.nests = nests
+                else:
+                    print("The nests are not correctly defined.")
+
             self._model_params = model_params
 
         self.config = Config()
@@ -166,6 +190,40 @@ class KernelModel:
         gc.collect()
         return None
 
+    from collections import Counter
+
+    from collections import Counter
+
+    def validate_nests(self, nests: List[List[int]], alternatives: List[int]) -> None:
+        """Validate the nests with the alternatives.
+        
+        Args:
+            nests: Nests defined by the user.
+            alternatives: Choice column alternatives of the dataset.
+        """
+        flattened_counts = Counter(num for sublist in nests for num in sublist)
+        flattened_set = set(flattened_counts.keys())
+        alternatives_set = set(alternatives)
+        duplicates = {num for num, count in flattened_counts.items() if count > 1}
+        missing = alternatives_set - flattened_set
+        extra = flattened_set - alternatives_set
+
+        if missing:
+            msg = f"Missing alternatives in nests: {', '.join(map(str, missing))}"
+            logger_error(msg)
+            raise ValueError(msg)
+        if extra:
+            msg = f"Extra alternatives in nests: {', '.join(map(str, extra))}"
+            logger_error(msg)
+            raise ValueError(msg)
+        if duplicates:
+            msg = f"Duplicates alternatives in nests: {', '.join(map(str, duplicates))}"
+            logger_error(msg)
+            raise ValueError(msg)
+
+
+
+
     def set_kernel_train(self,
                          X: pd.DataFrame,
                          choice_column: str,
@@ -189,6 +247,9 @@ class KernelModel:
             verbose: Indicates the level of verbosity of the function. If 0, no output will be printed. If 1, basic
                 information about the time spent and the size of the matrix will be displayed. Default: 1.
         """
+        if self.nested == True:
+            self.validate_nests(self.nests, X[choice_column].unique())
+
         self.clear_kernel(dataset="both")
         self._set_kernel_params(hyperparams)
         start_time = time.time()
@@ -235,6 +296,9 @@ class KernelModel:
             verbose: Indicates the level of verbosity of the function. If 0, no output will be printed. If 1, basic
                 information about the time spent and the size of the matrix will be displayed. Default: 1.
         """
+        if self.nested == True:
+            self.validate_nests(self.nests, Z[choice_column].unique())
+
         if self._X is None or self._K is None or self.choice_column is None or self.attributes is None:
             msg = "First you must compute the kernel for the train dataset using set_kernel_train()."
             logger_error(msg)
@@ -294,16 +358,22 @@ class KernelModel:
             logger_error(msg)
             raise RuntimeError(msg)
 
+        if self.nested == True:
+            self.lambd_shape = len(self.nests)
+            # Create the NestedKernelCalcs instance
+            calcs = NestedKernelCalcs(K=self._K, nests=self.nests)
+            # Create the NestedKernelEstimator instance
+            estimator = NestedKernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
+        else:
+            # Create the Calcs instance
+            calcs = KernelCalcs(K=self._K)
+            # Create the estimator instance
+            estimator = KernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
+
         if init_parms is None:
-            init_parms = np.zeros(self.alpha_shape, dtype=DEFAULT_DTYPE)
+            init_parms = np.zeros(self.lambd_shape + self.alpha_shape, dtype=DEFAULT_DTYPE)
         else:
             pass # TODO: check that there are self.n_parameters and then make a cast to self.alpha_shape
-
-        # Create the Calcs instance
-        calcs = KernelCalcs(K=self._K)
-
-        # Create the estimator instance
-        estimator = KernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
 
         # Log-likelihood at zero
         alpha_at_0 = np.zeros(self.alpha_shape, dtype=DEFAULT_DTYPE)
