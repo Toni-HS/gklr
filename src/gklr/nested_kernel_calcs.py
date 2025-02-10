@@ -22,6 +22,7 @@ class NestedKernelCalcs(Calcs):
 
     def calc_probabilities(self, 
                            alpha: np.ndarray,
+                           lambd: np.ndarray, 
                            indices: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Calculate the probabilities for each alternative.
@@ -31,6 +32,7 @@ class NestedKernelCalcs(Calcs):
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
+            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             indices: The indices of the rows of the dataset for which the
                 probabilities are calculated. If None, the probabilities are
                 calculated for all rows of the dataset. Default: None.
@@ -41,7 +43,7 @@ class NestedKernelCalcs(Calcs):
                 to a row of the dataset. The sum of the probabilities for each
                 row is 1. Shape: (n_samples, num_alternatives).
         """
-        f = self.calc_f(alpha, indices=indices)
+        f = self.calc_f(alpha, indices=indices, lambd=lambd)
         Y = self.calc_Y(f)
         G, G_j = self.calc_G(Y)
         P = self.calc_P(Y, G, G_j)
@@ -49,6 +51,7 @@ class NestedKernelCalcs(Calcs):
 
     def log_likelihood(self,
                        alpha: np.ndarray,
+                       lambd: np.ndarray,
                        P: Optional[np.ndarray] = None,
                        choice_indices: Optional[np.ndarray] = None,
                        pmle: Optional[str] = None,
@@ -59,6 +62,7 @@ class NestedKernelCalcs(Calcs):
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
+            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             P: The matrix of probabilities of each alternative for each row of 
                 the dataset. If None, the probabilities are calculated.
                 Shape: (n_samples, num_alternatives). Default: None.
@@ -81,7 +85,7 @@ class NestedKernelCalcs(Calcs):
         else:
             num_rows = indices.shape[0]
         if P is None:
-            P = self.calc_probabilities(alpha, indices=indices)
+            P = self.calc_probabilities(alpha, indices=indices, lambd=lambd)
         else:
             if P.shape != (num_rows, self.K.get_num_alternatives()):
                 m = (f"P has {P.shape} dimensions, but it should have "
@@ -109,7 +113,7 @@ class NestedKernelCalcs(Calcs):
         if pmle is None:
             pass
         elif pmle == "Tikhonov":
-            penalty = self.tikhonov_penalty(alpha, pmle_lambda)
+            penalty = self.tikhonov_penalty(alpha, pmle_lambda, lambd=lambd)
         else:
             msg = f"'pmle' = {pmle} is not a valid value for the penalization."
             logger_error(msg)
@@ -119,6 +123,7 @@ class NestedKernelCalcs(Calcs):
 
     def gradient(self,
                  alpha: np.ndarray,
+                 lambd: np.ndarray,
                  P: Optional[np.ndarray] = None,
                  pmle: Optional[str] = None,
                  pmle_lambda: float = 0,
@@ -129,6 +134,7 @@ class NestedKernelCalcs(Calcs):
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
+            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             pmle: It specifies the type of penalization for performing a penalized
                 maximum likelihood estimation.  Default: None.
             pmle_lambda: The lambda parameter for the penalized maximum likelihood.
@@ -149,7 +155,7 @@ class NestedKernelCalcs(Calcs):
         else:
             num_rows = indices.shape[0]
         if P is None:
-            P = self.calc_probabilities(alpha, indices=indices)
+            P = self.calc_probabilities(alpha, indices=indices, lambd=lambd)
         else:
             if P.shape != (num_rows, self.K.get_num_alternatives()):
                 m = (f"P has {P.shape} dimensions, but it should have "
@@ -165,7 +171,7 @@ class NestedKernelCalcs(Calcs):
         if pmle is None:
             pass
         elif pmle == "Tikhonov":
-            grad_penalization = self.tikhonov_penalty_gradient(alpha, pmle_lambda, indices=indices)
+            grad_penalization = self.tikhonov_penalty_gradient(alpha, pmle_lambda, indices=indices, lambd=lambd)
         else:
             msg = f"ERROR. {pmle} is not a valid value for the penalization method `pmle`."
             logger_error(msg)
@@ -183,6 +189,7 @@ class NestedKernelCalcs(Calcs):
 
     def calc_f(self, 
               alpha: np.ndarray, 
+              lambd: np.ndarray,
               indices: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Calculate the value of utility function for each alternative for each row
@@ -190,6 +197,7 @@ class NestedKernelCalcs(Calcs):
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
+            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             indices: The indices of the rows of the dataset for which the utility
                 function is calculated. If None, all the rows are used. Default: None.
 
@@ -237,12 +245,14 @@ class NestedKernelCalcs(Calcs):
 
     def tikhonov_penalty(self,
                          alpha: np.ndarray,
+                         lambd: np.ndarray,
                          pmle_lambda: float
     ) -> float:
         """Calculate the Tikhonov penalty for the given parameters.
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
+            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             pmle_lambda: The lambda parameter for the penalized maximum likelihood.
 
         Returns:
@@ -257,6 +267,7 @@ class NestedKernelCalcs(Calcs):
 
     def tikhonov_penalty_gradient(self,
                                   alpha: np.ndarray,
+                                  lambd: np.ndarray,
                                   pmle_lambda: float,
                                   indices: Optional[np.ndarray] = None,
     ) -> np.ndarray:
@@ -264,6 +275,7 @@ class NestedKernelCalcs(Calcs):
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
+            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             pmle_lambda: The lambda parameter for the penalized maximum likelihood.
             indices: The indices of the rows of the dataset for which the gradient
 

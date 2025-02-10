@@ -66,18 +66,19 @@ class Estimation(ABC):
         return
 
     def minimize(self,
-                 params: np.ndarray,
+                 alpha_params: np.ndarray,
                  loss_tol: float = 1e-06,
                  options: Optional[Dict[str, Any]] = None,
+                 **kargs: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Minimize the objective function.
         
         Args:
-            params: The initial values of the model parameters. Shape: (n_params,).
+            alpha_params: The initial values of the model parameters. Shape: (n_params,).
             loss_tol: The tolerance for the loss function. Default: 1e-06.
             options: A dict with advance options for the optimization method. 
                 Default: None.
-            
+            **kargs: Additional arguments for the estimation.
         Returns:
             A dict with the results of the optimization.
         """
@@ -97,12 +98,12 @@ class Estimation(ABC):
         if self.method in SCIPY_OPTIMIZATION_METHODS:
             # Use the scipy.optimize.minimize function
             jac = self.gradient
-            res = minimize(self.objective_function, params, method=self.method, jac=jac, tol=loss_tol, options=options)
+            res = minimize(self.objective_function, alpha_params, method=self.method, jac=jac, tol=loss_tol, options=options)
         elif self.method in CUSTOM_OPTIMIZATION_METHODS:
             # Use the custom optimization function
             optimizer = Optimizer()
             jac = self.gradient
-            res = optimizer.minimize(self.objective_function, params, method=self.method, jac=jac, tol=loss_tol, options=options)
+            res = optimizer.minimize(self.objective_function, alpha_params, method=self.method, jac=jac, tol=loss_tol, options=options)
             # Override default history values because possible minibatches store only the disaggretated loss
             self.history['loss'] = res["history"]["loss"]
             self.history['time'] = res["history"]["time"]
@@ -112,7 +113,8 @@ class Estimation(ABC):
             raise ValueError(msg)
         results = {
             "fun": res["fun"], # Final value of the objective function
-            "params": res["x"], # The solution array
+            "alpha_params": res["x"], # The solution array for alpha
+            "lambda_params": "Solution", # The solution array for lambda
             "success": res["success"], # A boolean flag indicating if the optimizer exited successfully
             "message": res["message"], # A string that describes the cause of the termination
         }

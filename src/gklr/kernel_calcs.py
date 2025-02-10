@@ -1,5 +1,5 @@
 """GKLR kernel_calcs module."""
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 import numpy as np
 
@@ -53,6 +53,7 @@ class KernelCalcs(Calcs):
                        pmle: Optional[str] = None,
                        pmle_lambda: float = 0,
                        indices: Optional[np.ndarray] = None,
+                       **kargs: Dict[str, Any],
     ) -> float:
         """Calculate the log-likelihood of the KLR model for the given parameters.
 
@@ -71,6 +72,7 @@ class KernelCalcs(Calcs):
             indices: The indices of the rows of the dataset for which the
                 log-likelihood is calculated. If None, the log-likelihood is
                 calculated for all rows of the dataset. Default: None.
+            **kargs: Additional arguments for the likelihood function.
 
         Returns:
             The log-likelihood of the KLR model for the given parameters.

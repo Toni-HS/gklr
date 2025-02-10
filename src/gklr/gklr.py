@@ -16,7 +16,7 @@ from .kernel_utils import *
 from .kernel_estimator import KernelEstimator
 from .kernel_calcs import KernelCalcs
 from .nested_kernel_calcs import NestedKernelCalcs
-from .nested_kernel_estimator import NestedKernelEstimator
+from .nested_kernel_estimatory import NestedKernelEstimator
 from .kernel_matrix import KernelMatrix
 
 from collections import Counter # To count occurrences of numbers in the vector of vectors
@@ -43,7 +43,7 @@ class KernelModel:
         self._alpha = None
         self.alpha_shape = None
         self.lambd = None
-        self.lambd_shape = None # siguiente paso
+        self.lambd_shape = None
         self.n_parameters = 0
         self.results = None
         self.nests = None
@@ -57,16 +57,35 @@ class KernelModel:
             # TODO: Check if the nests exist and in that case, check if they are correctly defined
 
             if "nests" in model_params:
-                print("Nests found")
+                msg = "The nests will be ignored."
                 nests = model_params["nests"]
-                if isinstance(nests, list) and len(nests) > 1 and \
-                    all(isinstance(inner, list) and len(inner) > 0 and 
-                    all(isinstance(num, int) for num in inner) for inner in nests):
-                    print("Nests are correct")
-                    self.nested = True
-                    self.nests = nests
+                if not isinstance(nests, list):
+                    msg += " The nests must be in a list."
+                    logger_warning(msg)
+                elif len(nests) == 0:
+                    msg += " There must be nests."
+                    logger_warning(msg)
+                elif len(nests) == 1:
+                    logger_warning(msg)
                 else:
-                    print("The nests are not correctly defined.")
+                    done = False
+                    for nest in nests:
+                        if not done:
+                            if not isinstance(nest, list):
+                                msg += " The nests must be lists."
+                                logger_warning(msg)
+                                done = True
+                            elif len(nest) == 0:
+                                msg += " The nests cannot be empty."
+                                logger_warning(msg)
+                                done = True
+                            elif not all(isinstance(num, int) for num in nest):
+                                logger_warning(msg)
+                                done = True
+
+                    if not done:
+                        self.nests = nests
+                        self.nested = True
 
             self._model_params = model_params
 
@@ -189,10 +208,6 @@ class KernelModel:
             raise ValueError(msg)
         gc.collect()
         return None
-
-    from collections import Counter
-
-    from collections import Counter
 
     def validate_nests(self, nests: List[List[int]], alternatives: List[int]) -> None:
         """Validate the nests with the alternatives.
@@ -332,7 +347,8 @@ class KernelModel:
         return None
 
     def fit(self,
-            init_parms: Optional[np.ndarray] = None,
+            alpha_params: Optional[np.ndarray] = None,
+            lambd_params: Optional[np.ndarray] = None,
             pmle: str = "Tikhonov",
             pmle_lambda: float = 0,
             method: str = "L-BFGS-B",
@@ -344,8 +360,10 @@ class KernelModel:
         Perform the estimation of the kernel model and store post-estimation results.
 
         Args:
-            init_parms: Initial value of the parameters to be optimized.
+            alpha_params: Initial value of the parameters to be optimized.
                 Shape: (num_cols_kernel_matrix, n_features). Default: None
+            lambd_params: Initial value of the nests parameters to be optimized.
+                Shape: (lambd_shape,). Default: None
             pmle: Penalization method. Default: None.
             pmle_lambda: Parameter for the penalization method. Default: 0
             method: Optimization method. Default: "L-BFGS-B".
@@ -370,17 +388,25 @@ class KernelModel:
             # Create the estimator instance
             estimator = KernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
 
-        if init_parms is None:
-            init_parms = np.zeros(self.lambd_shape + self.alpha_shape, dtype=DEFAULT_DTYPE)
+        if alpha_params is None:
+            alpha_params = np.zeros(self.alpha_shape, dtype=DEFAULT_DTYPE)
         else:
             pass # TODO: check that there are self.n_parameters and then make a cast to self.alpha_shape
 
+        lambd_at_1 = None
+        if lambd_params is None and self.nested == True:
+            lambd_params = np.ones(self.lambd_shape, dtype=DEFAULT_DTYPE)
+            # Log-likelihood at one
+            lambd_at_1 = np.ones(self.lambd_shape, dtype=DEFAULT_DTYPE)
+        else:
+            pass
+
         # Log-likelihood at zero
         alpha_at_0 = np.zeros(self.alpha_shape, dtype=DEFAULT_DTYPE)
-        log_likelihood_at_zero = calcs.log_likelihood(alpha_at_0)
+        log_likelihood_at_zero = calcs.log_likelihood(alpha_at_0, lambd = lambd_at_1)
 
         # Initial log-likelihood
-        initial_log_likelihood = calcs.log_likelihood(init_parms)
+        initial_log_likelihood = calcs.log_likelihood(alpha_params, lambd = lambd_params)
 
         if verbose >= 1:
             print("The estimation is going to start...\n"
@@ -393,11 +419,17 @@ class KernelModel:
 
         # Perform the estimation
         start_time = time.time()
-        self.results = estimator.minimize(init_parms.reshape(self.n_parameters), options=options)
+        ## TODO: Concatenate alpha_params and lambd_params inside minimize method
+        self.results = estimator.minimize(alpha_params.reshape(self.n_parameters), options=options, lambd_params=lambd_params)
         elapsed_time_sec = time.time() - start_time
         elapsed_time_str = elapsed_time_to_str(elapsed_time_sec)
 
-        final_log_likelihood = calcs.log_likelihood(self.results["alpha"])
+        ## TODO: With nested configuration is not implemented yet
+        if self.nested == True:
+            final_log_likelihood = calcs.log_likelihood(self.results["alpha"], lambd = self.results["lambd"])
+        else:
+            final_log_likelihood = calcs.log_likelihood(self.results["alpha"])
+
         mcfadden_r2 = 1 - final_log_likelihood / log_likelihood_at_zero  # TODO: Implement a method to compute metrics
 
         # Store post-estimation information
@@ -469,7 +501,10 @@ class KernelModel:
             logger_error(msg)
             raise RuntimeError(msg)
 
-        if train:
+        if train and self.nested:
+            # Create the Calcs instance for nests
+            calcs = NestedKernelCalcs(K=self._K)
+        elif train:
             # Create the Calcs instance
             calcs = KernelCalcs(K=self._K)
         else:
@@ -477,15 +512,23 @@ class KernelModel:
                 msg = "First you must compute the kernel for the test dataset using set_kernel_test()."
                 logger_error(msg)
                 raise RuntimeError(msg)
-            # Create the Calcs instance
-            calcs = KernelCalcs(K=self._K_test)
+            if self.nested:
+                # Create the Calcs instance for nests
+                calcs = NestedKernelCalcs(K=self._K_test)
+            else:
+                # Create the Calcs instance
+                calcs = KernelCalcs(K=self._K_test)
 
         if self.results is None:
             msg = "First you must estimate the model using fit()."
             logger_error(msg)
             raise RuntimeError(msg)
 
-        proba = calcs.calc_probabilities(self.results["alpha"])
+        if self.nested == True:
+            proba = calcs.calc_probabilities(self.results["alpha"], lambd = self.results["lambda"])
+        else:
+            proba = calcs.calc_probabilities(self.results["alpha"])
+
         return proba
 
     def predict_log_proba(self, train: bool = False) -> np.ndarray:

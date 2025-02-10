@@ -162,7 +162,7 @@ class KernelEstimator(Estimation):
 
 
     def minimize(self,
-                 params: np.ndarray,
+                 alpha_params: np.ndarray,
                  loss_tol: float = 1e-06,
                  options: Optional[Dict[str, Any]] = None,
                  **kargs: Dict[str, Any],
@@ -170,7 +170,7 @@ class KernelEstimator(Estimation):
         """Minimize the objective function.
 
         Args:
-            params: The initial values of the model parameters. Shape: (n_params,).
+            alpha_params: The initial values of the model parameters. Shape: (n_params,).
             loss_tol: The tolerance for the loss function. Default: 1e-06.
             options: A dict with advance options for the optimization method. 
                 Default: None.
@@ -179,7 +179,7 @@ class KernelEstimator(Estimation):
         Returns:
             A dict with the results of the optimization.
         """
-        results = super().minimize(params, loss_tol, options, **kargs)
-        # Convert params to alpha np vector and reshape them as a column vector
-        results["alpha"] = results["params"].reshape(self.alpha_shape)
+        results = super().minimize(alpha_params, loss_tol, options, **kargs)
+        # Convert alpha_params to alpha np vector and reshape them as a column vector
+        results["alpha"] = results["alpha_params"].reshape(self.alpha_shape)
         return results
