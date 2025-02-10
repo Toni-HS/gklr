@@ -85,6 +85,12 @@ def get_default_logger(name: str,
         The logger instance."""
     logger = logging.getLogger(name)
     #logger.addHandler(_get_console_handler())
+
+    console_handler = _get_console_handler()
+    console_handler.setLevel(logging.WARNING)
+    console_handler.addFilter(lambda record: record.levelno == logging.WARNING)
+    logger.addHandler(console_handler)
+
     logger.addHandler(_get_file_handler(logPath, fileName))
     logger.setLevel(level)
     logger.propagate = False
