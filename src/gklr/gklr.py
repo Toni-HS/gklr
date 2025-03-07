@@ -16,7 +16,7 @@ from .kernel_utils import *
 from .kernel_estimator import KernelEstimator
 from .kernel_calcs import KernelCalcs
 from .nested_kernel_calcs import NestedKernelCalcs
-from .nested_kernel_estimatory import NestedKernelEstimator
+from .nested_kernel_estimator import NestedKernelEstimator
 from .kernel_matrix import KernelMatrix
 
 from collections import Counter # To count occurrences of numbers in the vector of vectors
