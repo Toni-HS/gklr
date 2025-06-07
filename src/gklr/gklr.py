@@ -419,16 +419,14 @@ class KernelModel:
 
         # Perform the estimation
         start_time = time.time()
-        ## TODO: Concatenate alpha_params and lambd_params inside minimize method
-        self.results = estimator.minimize(alpha_params.reshape(self.n_parameters), options=options, lambd_params=lambd_params)
+        self.results = estimator.minimize(alpha_params.reshape(self.n_parameters), lambd_params, options=options)
         elapsed_time_sec = time.time() - start_time
         elapsed_time_str = elapsed_time_to_str(elapsed_time_sec)
 
-        ## TODO: With nested configuration is not implemented yet
         if self.nested == True:
-            final_log_likelihood = calcs.log_likelihood(self.results["alpha"], lambd = self.results["lambd"])
+            final_log_likelihood = calcs.log_likelihood(self.results["alpha_params"], lambd = self.results["lambd_params"])
         else:
-            final_log_likelihood = calcs.log_likelihood(self.results["alpha"])
+            final_log_likelihood = calcs.log_likelihood(self.results["alpha_params"])
 
         mcfadden_r2 = 1 - final_log_likelihood / log_likelihood_at_zero  # TODO: Implement a method to compute metrics
 
@@ -503,7 +501,7 @@ class KernelModel:
 
         if train and self.nested:
             # Create the Calcs instance for nests
-            calcs = NestedKernelCalcs(K=self._K)
+            calcs = NestedKernelCalcs(K=self._K, nests=self.nests)
         elif train:
             # Create the Calcs instance
             calcs = KernelCalcs(K=self._K)
@@ -514,7 +512,7 @@ class KernelModel:
                 raise RuntimeError(msg)
             if self.nested:
                 # Create the Calcs instance for nests
-                calcs = NestedKernelCalcs(K=self._K_test)
+                calcs = NestedKernelCalcs(K=self._K_test, nests=self.nests)
             else:
                 # Create the Calcs instance
                 calcs = KernelCalcs(K=self._K_test)
@@ -525,9 +523,9 @@ class KernelModel:
             raise RuntimeError(msg)
 
         if self.nested == True:
-            proba = calcs.calc_probabilities(self.results["alpha"], lambd = self.results["lambda"])
+            proba = calcs.calc_probabilities(self.results["alpha_params"], lambd = self.results["lambd_params"])
         else:
-            proba = calcs.calc_probabilities(self.results["alpha"])
+            proba = calcs.calc_probabilities(self.results["alpha_params"])
 
         return proba
 

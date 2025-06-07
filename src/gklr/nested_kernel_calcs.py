@@ -19,12 +19,31 @@ class NestedKernelCalcs(Calcs):
         """
         super().__init__(K)
         self.nests = nests
+        self.lambd_shape = len(nests)
+        self.mask = self.build_mask(self.lambd_shape, K.get_num_alternatives())
+        self.group_of_alternatives = np.argmax(self.mask, axis=0)
+        
+    def build_mask(self, lambd_shape: int, num_alternatives: int) -> np.ndarray:
+        """Build a mask for the nests.
+
+        Args:
+            lambd_shape: The number of nests.
+            num_alternatives: The number of alternatives.
+
+        Returns:
+            A mask of shape (lambd_shape, num_alternatives) with 1 values
+            for the alternatives in each nest and 0 otherwise.
+        """
+        mask = np.zeros((lambd_shape, num_alternatives), dtype=int)
+        for nest_index, alts in enumerate(self.nests):
+            mask[nest_index, alts] = 1
+        return mask
 
     def calc_probabilities(self, 
                            alpha: np.ndarray,
                            lambd: np.ndarray, 
                            indices: Optional[np.ndarray] = None,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Calculate the probabilities for each alternative.
 
         Obtain the probabilities for each alternative for each row of the
@@ -38,16 +57,37 @@ class NestedKernelCalcs(Calcs):
                 calculated for all rows of the dataset. Default: None.
 
         Returns:
-            A matrix of probabilities for each alternative for each row of the
-                dataset. Each column corresponds to an alternative and each row
-                to a row of the dataset. The sum of the probabilities for each
-                row is 1. Shape: (n_samples, num_alternatives).
+                A tuple with the matrix of probabilities `P` and the matrix of 
+                conditional probabilities 'P_cond'.
+                    The matrix of probabilities for each alternative for each row of the
+                    dataset. Each column corresponds to an alternative and each row
+                    to a row of the dataset. The sum of the probabilities for each
+                    row is 1. Shape: (n_samples, num_alternatives) its conditional is a numpy 
+                    array of shape: (n_samples, num_alternatives).
         """
-        f = self.calc_f(alpha, indices=indices, lambd=lambd)
-        Y = self.calc_Y(f)
-        G, G_j = self.calc_G(Y)
+        f = self.calc_f(alpha, indices=indices)
+        Y = self.calc_Y(f, lambd)
+        G, G_j = self.calc_G(Y, lambd)
         P = self.calc_P(Y, G, G_j)
         return P
+    
+    def calc_Y(self,
+               f: np.ndarray, 
+               lambd: np.ndarray, 
+               ) -> np.ndarray:
+        """
+        Computes the matrix Y whose columns are e^(f_j / lambda_K).
+        
+        Args:
+            f: Utility matrix f of shape (n_samples, num_alternatives).
+            lambd: Vector with the lambda_K values for each nest.
+            
+        Returns:
+            Matrix Y of shape (n_samples, num_alternatives).
+        """
+        lambd_per_alternative = lambd[self.group_of_alternatives].flatten()
+        Y = np.exp(f / lambd_per_alternative)
+        return Y
 
     def log_likelihood(self,
                        alpha: np.ndarray,
@@ -113,7 +153,7 @@ class NestedKernelCalcs(Calcs):
         if pmle is None:
             pass
         elif pmle == "Tikhonov":
-            penalty = self.tikhonov_penalty(alpha, pmle_lambda, lambd=lambd)
+            penalty = self.tikhonov_penalty(alpha, pmle_lambda)
         else:
             msg = f"'pmle' = {pmle} is not a valid value for the penalization."
             logger_error(msg)
@@ -125,6 +165,7 @@ class NestedKernelCalcs(Calcs):
                  alpha: np.ndarray,
                  lambd: np.ndarray,
                  P: Optional[np.ndarray] = None,
+                 Y: Optional[np.ndarray] = None,
                  pmle: Optional[str] = None,
                  pmle_lambda: float = 0,
                  indices: Optional[np.ndarray] = None,
@@ -162,7 +203,17 @@ class NestedKernelCalcs(Calcs):
                     f" dimensions: ({num_rows}, {self.K.get_num_alternatives()}).")
                 logger_error(m)
                 raise ValueError(m)
+        if Y is None:
+            Y = self.calc_Y(alpha, lambd=lambd)
+        else:
+            if Y.shape != (num_rows, self.K.get_num_alternatives()):
+                m = (f"Y has {Y.shape} dimensions, but it should have "
+                    f" dimensions: ({num_rows}, {self.K.get_num_alternatives()}).")
+                logger_error(m)
+                raise ValueError(m)
         
+        P_cond = self.calc_P_cond(Y, lambd)
+
         # Compute the gradient of the log-likelihood function
         Z = self.K.get_choices_matrix()
         if indices is not None:
@@ -171,25 +222,36 @@ class NestedKernelCalcs(Calcs):
         if pmle is None:
             pass
         elif pmle == "Tikhonov":
-            grad_penalization = self.tikhonov_penalty_gradient(alpha, pmle_lambda, indices=indices, lambd=lambd)
+            grad_penalization = self.tikhonov_penalty_gradient(alpha, pmle_lambda, indices=indices)
         else:
             msg = f"ERROR. {pmle} is not a valid value for the penalization method `pmle`."
             logger_error(msg)
             raise ValueError(msg)
-        H = grad_penalization + P - Z
-
+        
         n_alts = self.K.get_num_alternatives()
+
+        lambd_per_alternative = lambd[self.group_of_alternatives].flatten()
+        w = 1 / lambd_per_alternative
+        H = grad_penalization - ((Z * w) + ((1 - w) * P_cond) - P)
+
         gradient = np.zeros((self.K.get_num_cols(), n_alts), dtype=DEFAULT_DTYPE)
+
         for alt in range(0,n_alts):
             gradient_alt = self.K.dot(H[:, alt], K_index=alt, col_indices=indices)
             gradient_alt = (gradient_alt / H.shape[0]).reshape((self.K.get_num_cols(),))
             gradient[:, alt] = gradient_alt
         gradient = gradient.reshape(self.K.get_num_cols() * self.K.get_num_alternatives())
-        return gradient
+
+        # Compute the gradient of lambdas
+        Pk = np.dot(P, self.mask.T)
+        Pk_sample = (np.dot (Z, self.mask.T)).mean(axis=0)
+        L = np.log(np.dot(Y, self.mask.T))
+        lambd_gradient = (np.sum((L - (1 / lambd.T)) * (Pk - Pk_sample), axis=0)) / H.shape[0]
+
+        return np.concatenate((lambd_gradient, gradient))
 
     def calc_f(self, 
               alpha: np.ndarray, 
-              lambd: np.ndarray,
               indices: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Calculate the value of utility function for each alternative for each row
@@ -222,37 +284,61 @@ class NestedKernelCalcs(Calcs):
             f[:, alt] = f_alt.reshape((num_rows,))  # Store the result in the corresponding column
         return f
 
-    def calc_G(self, Y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Calculate the generating function `G` of a Generalized Extreme Value
-            (GEV) model and its derivative. For KLR model, the generating function
-            is the sum of the utilities of the alternatives for each row of the
-            dataset.
+    def calc_P_cond(self,
+                        Y: np.ndarray, 
+                        lambd: np.ndarray, 
+    ) -> np.ndarray:
+        """
+        Calcula la matriz de probabilidades condicionadas P_j como:
+            P_j = Y_j / G_j^(1 / (lambda_K - 1))
 
         Args:
-            Y: The auxiliary matrix `Y` that contains the exponentiated values of the
-                matrix `f`. Shape: (n_samples, num_alternatives).
+            Y: Matriz de tamaño (n_samples, num_alternatives) con los valores de utilidad transformados.
+            G_j: Matriz de tamaño (n_samples, num_alternatives) con la suma de Y_j en cada nido elevado a lambda_K - 1.
+            lambda_K: Vector con los valores de lambda para cada nido.
+            nidos: Lista de listas con las alternativas en cada nido.
 
         Returns:
-            A tuple with the auxiliary matrix `G` and its derivative.
-                The auxiliary matrix `G` is a numpy array of shape: (n_samples, 1)
-                and its derivative `G_j` is a numpy array of shape: (n_samples, num_alternatives).
+            Matriz de probabilidades condicionadas P_cond de tamaño (n_samples, num_alternatives).
         """
-        # Implementation for KLR
-        G = np.sum(Y, axis=1).reshape((Y.shape[0], 1))
-        # Compute G_j, the derivative of G with respecto to the variable Y_j
-        G_j = np.ones_like(Y)
+        lambd_per_alternative = lambd[self.group_of_alternatives].flatten()
+        Y_exp = Y**(1/lambd_per_alternative)
+        P_cond = Y_exp / (np.dot(Y_exp, (np.dot(self.mask.T,self.mask))))
+
+        return P_cond
+
+
+    def calc_G(self,
+                Y : np.ndarray, 
+                lambd: np.ndarray, 
+                ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Calcula G sumando las columnas de Y por nido, elevando cada suma con su lambda_K
+        y sumando los resultados en una sola columna.
+
+        Args:
+            Y: Matriz de tamaño (n_samples, num_alternatives) con los valores de utilidad transformados.
+            lambda: Vector con los valores de lambda para cada nido.
+
+        Returns:
+             A tuple with the auxiliary matrix `G` and its derivative.
+    #             The auxiliary matrix `G` is a numpy array of shape: (n_samples, 1)
+    #             and its derivative `G_j` is a numpy array of shape: (n_samples, num_alternatives).
+        """
+        D_k = np.dot(Y, self.mask.T)
+        G = np.sum(D_k ** lambd.T, axis=1).reshape((Y.shape[0], 1))
+        G_j = np.dot(D_k ** (lambd.T - 1), self.mask)
+
         return (G, G_j)
 
     def tikhonov_penalty(self,
                          alpha: np.ndarray,
-                         lambd: np.ndarray,
                          pmle_lambda: float
     ) -> float:
         """Calculate the Tikhonov penalty for the given parameters.
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
-            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             pmle_lambda: The lambda parameter for the penalized maximum likelihood.
 
         Returns:
@@ -267,7 +353,6 @@ class NestedKernelCalcs(Calcs):
 
     def tikhonov_penalty_gradient(self,
                                   alpha: np.ndarray,
-                                  lambd: np.ndarray,
                                   pmle_lambda: float,
                                   indices: Optional[np.ndarray] = None,
     ) -> np.ndarray:
@@ -275,7 +360,6 @@ class NestedKernelCalcs(Calcs):
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
-            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             pmle_lambda: The lambda parameter for the penalized maximum likelihood.
             indices: The indices of the rows of the dataset for which the gradient
 

@@ -46,23 +46,21 @@ class NestedKernelEstimator(Estimation):
         super().__init__(calcs, pmle, pmle_lambda, method, verbose)
         self.calcs = calcs
         self.alpha_shape = (calcs.K.get_num_cols(), calcs.K.get_num_alternatives())
-        self.lambd_shape = (len(calcs.nests))
+        self.lambd_shape = calcs.lambd_shape
         self.P_cache = None # Cache for the matrix of probabilities P
         self.prev_alpha_params = None # Previous parameters used in the objective function
         self.prev_lambd_params = None # Previous nests parameters used in the objective function
         self.prev_indices = None # Previous indices used in the objective function
 
     def objective_function(self,
-                           alpha_params: np.ndarray,
-                           lambd_params: np.ndarray,
+                           params: np.ndarray,
                            indices: Optional[np.ndarray] = None
     ) -> float:
         """Compute the objective function for the Kernel Logistic Regression 
         (KLR) model and its gradient.
 
         Args:
-            alpha_params: The model parameters. Shape: (n_params,).
-            lambd_params: The nests parameters. Shape: (lambd_shape,).
+            params: The model parameters. Shape: (lambd_shape + n_params,).
             indices: The indices of the samples to be used in the computation of
                 the objective function. If 'None' all the samples will be used.
                 Default: None.
@@ -72,26 +70,29 @@ class NestedKernelEstimator(Estimation):
             and the second element is the gradient of the objective function with 
             respect to the model parameters with shape: (num_rows_kernel_matrix * num_alternatives,)
         """
-        # Convert alpha_params to alfas and reshape them as a column vector
-        alpha = alpha_params.reshape(self.alpha_shape)
-        lambd = None ## TODO: Implement the lambda parameter
+        # Convert params to lambd_params and alpha_params and reshape them as a column vector
+        lambd_params = params[:self.lambd_shape]
+        alpha_params = params[self.lambd_shape:].reshape(self.alpha_shape)
 
-        if self.prev_alpha_params is None or not np.array_equal(alpha_params, self.prev_alpha_params) or \
+        if self.prev_alpha_params is None or self.prev_lambd_params is None or \
+            not np.array_equal(alpha_params, self.prev_alpha_params) or \
+            not np.array_equal(lambd_params, self.prev_lambd_params) or \
             (indices is not None and self.prev_indices is None) or \
             (indices is None and self.prev_indices is not None) or \
             (indices is not None and self.prev_indices is not None and \
             not np.array_equal(indices, self.prev_indices)):
             # Compute the matrix of probabilities P and store it in the cache
-            P = self.calcs.calc_probabilities(alpha, indices=indices, lambd=lambd)
+            P = self.calcs.calc_probabilities(alpha_params, indices=indices, lambd=lambd_params)
             self.P_cache = P
             self.prev_alpha_params = alpha_params
+            self.prev_lambd_params = lambd_params
             self.prev_indices = indices
         else:
             # Reuse the cached matrix of probabilities P
             P = self.P_cache
 
         # Compute the log-likelihood
-        ll = self.calcs.log_likelihood(alpha, P=P, pmle=self.pmle, pmle_lambda=self.pmle_lambda, indices=indices, lambd=lambd)
+        ll = self.calcs.log_likelihood(alpha_params, P=P, pmle=self.pmle, pmle_lambda=self.pmle_lambda, indices=indices, lambd=lambd_params)
         self.history["loss"].append(-ll)
 
         if self.verbose >= 2:
@@ -100,7 +101,7 @@ class NestedKernelEstimator(Estimation):
         return (-ll)
 
     def gradient(self,
-                 alpha_params: np.ndarray,
+                 params: np.ndarray,
                  indices: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """Compute the gradient of the objective function for the Kernel Logistic
@@ -112,45 +113,49 @@ class NestedKernelEstimator(Estimation):
         method, setting the 'return_gradient' argument to 'True'.
 
         Args:
-            alpha_params: The model parameters. Shape: (n_params,).
+            params: The model parameters. Shape: (lambd_shape + n_params,).
             indices: The indices of the samples to be used in the computation of
                 the the gradient. If 'None' all the samples will be used.
                 Default: None.
         
         Returns:
             The gradient of the objective function with respect to the model
-            parameters with shape: (num_rows_kernel_matrix * num_alternatives,).
+            parameters with shape: (lambd_shape + num_rows_kernel_matrix * num_alternatives,).
         """
-        # Convert params to alfas and reshape them as a column vector
-        alpha = alpha_params.reshape(self.alpha_shape)
+        # Convert params to lambd_params and alpha_params and reshape them as a column vector
+        lambd_params = params[:self.lambd_shape]
+        alpha_params = params[self.lambd_shape:].reshape(self.alpha_shape)
 
-        if self.prev_alpha_params is None or not np.array_equal(alpha_params, self.prev_alpha_params) or \
+        if self.prev_alpha_params is None or self.prev_lambd_params is None or \
+            not np.array_equal(alpha_params, self.prev_alpha_params) or \
+            not np.array_equal(lambd_params, self.prev_lambd_params) or \
             (indices is not None and self.prev_indices is None) or \
             (indices is None and self.prev_indices is not None) or \
             (indices is not None and self.prev_indices is not None and \
             not np.array_equal(indices, self.prev_indices)):
             # Compute the matrix of probabilities P and store it in the cache
-            P = self.calcs.calc_probabilities(alpha, indices=indices)
+            P = self.calcs.calc_probabilities(alpha_params, indices=indices, lambd=lambd_params)
             self.P_cache = P
             self.prev_alpha_params = alpha_params
+            self.prev_lambd_params = lambd_params
             self.prev_indices = indices
         else:
             # Reuse the cached matrix of probabilities P
             P = self.P_cache
 
         # Compute the log-likelihood and gradient
-        gradient = self.calcs.gradient(alpha, P=P, pmle=self.pmle, pmle_lambda=self.pmle_lambda, indices=indices)
+        gradient = self.calcs.gradient(alpha_params, P=P, pmle=self.pmle, pmle_lambda=self.pmle_lambda, indices=indices, lambd=lambd_params)
         return gradient
 
     def objective_function_with_gradient(self,
-                                         alpha_params: np.ndarray,
+                                         params: np.ndarray,
                                          indices: Optional[np.ndarray] = None
     ) -> Tuple[float, np.ndarray]:
         """Compute the objective function for the Kernel Logistic Regression 
         (KLR) model and its gradient.
 
         Args:
-            alpha_params: The model parameters. Shape: (n_params,).
+            params: The model parameters. Shape: (lambd_shape + n_params,).
             indices: The indices of the samples to be used in the computation of
                 the objective function. If 'None' all the samples will be used.
                 Default: None.
@@ -161,8 +166,8 @@ class NestedKernelEstimator(Estimation):
             respect to the model parameters with shape: (num_rows_kernel_matrix * num_alternatives,)
         """
         # Compute the log-likelihood and gradient
-        obj = self.objective_function(alpha_params, indices=indices)
-        gradient = self.gradient(alpha_params, indices=indices)
+        obj = self.objective_function(params, indices=indices)
+        gradient = self.gradient(params, indices=indices)
         return (obj, gradient)
 
 
@@ -186,9 +191,9 @@ class NestedKernelEstimator(Estimation):
         Returns:
             A dict with the results of the optimization.
         """
-        kargs["lambd_params"] = lambd_params
-        results = super().minimize(alpha_params, loss_tol, options, **kargs)
+        params = np.concatenate((lambd_params, alpha_params))
+        results = super().minimize(params, loss_tol, options, **kargs)
         # Convert alpha_params to alpha np vector and reshape them as a column vector
-        results["alpha"] = results["alpha_params"].reshape(self.alpha_shape)
-        results["lambd"] = results["lambd_params"].reshape(self.lambd_shape)
+        results["lambd_params"] = results["params"][:self.lambd_shape]
+        results["alpha_params"] = results["params"][self.lambd_shape:].reshape(self.alpha_shape)
         return results

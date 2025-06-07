@@ -181,5 +181,5 @@ class KernelEstimator(Estimation):
         """
         results = super().minimize(alpha_params, loss_tol, options, **kargs)
         # Convert alpha_params to alpha np vector and reshape them as a column vector
-        results["alpha"] = results["alpha_params"].reshape(self.alpha_shape)
+        results["alpha_params"] = results["params"].reshape(self.alpha_shape)
         return results

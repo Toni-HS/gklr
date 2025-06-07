@@ -232,7 +232,7 @@ class KernelCalcs(Calcs):
         """
         # Implementation for KLR
         G = np.sum(Y, axis=1).reshape((Y.shape[0], 1))
-        # Compute G_j, the derivative of G with respecto to the variable Y_j
+        # Compute G_j, the derivative of G with respect to the variable Y_j
         G_j = np.ones_like(Y)
         return (G, G_j)
 
