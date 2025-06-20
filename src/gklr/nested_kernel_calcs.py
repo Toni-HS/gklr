@@ -43,7 +43,7 @@ class NestedKernelCalcs(Calcs):
                            alpha: np.ndarray,
                            lambd: np.ndarray, 
                            indices: Optional[np.ndarray] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> np.ndarray:
         """Calculate the probabilities for each alternative.
 
         Obtain the probabilities for each alternative for each row of the
@@ -51,19 +51,15 @@ class NestedKernelCalcs(Calcs):
 
         Args:
             alpha: The vector of parameters. Shape: (num_cols_kernel_matrix, num_alternatives).
-            lambd: The vector of nests parameters. Shape: (lambd_shape,).
             indices: The indices of the rows of the dataset for which the
                 probabilities are calculated. If None, the probabilities are
                 calculated for all rows of the dataset. Default: None.
 
         Returns:
-                A tuple with the matrix of probabilities `P` and the matrix of 
-                conditional probabilities 'P_cond'.
-                    The matrix of probabilities for each alternative for each row of the
-                    dataset. Each column corresponds to an alternative and each row
-                    to a row of the dataset. The sum of the probabilities for each
-                    row is 1. Shape: (n_samples, num_alternatives) its conditional is a numpy 
-                    array of shape: (n_samples, num_alternatives).
+            A matrix of probabilities for each alternative for each row of the
+                dataset. Each column corresponds to an alternative and each row
+                to a row of the dataset. The sum of the probabilities for each
+                row is 1. Shape: (n_samples, num_alternatives).
         """
         f = self.calc_f(alpha, indices=indices)
         Y = self.calc_Y(f, lambd)
