@@ -200,7 +200,7 @@ class NestedKernelCalcs(Calcs):
                 logger_error(m)
                 raise ValueError(m)
         if Y is None:
-            Y = self.calc_Y(alpha, lambd=lambd)
+            Y = self.calc_Y(self.calc_f(alpha, indices=indices), lambd=lambd)
         else:
             if Y.shape != (num_rows, self.K.get_num_alternatives()):
                 m = (f"Y has {Y.shape} dimensions, but it should have "
