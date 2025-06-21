@@ -21,6 +21,7 @@ class NestedKernelCalcs(Calcs):
         self.nests = nests
         self.lambd_shape = len(nests)
         self.mask = self.build_mask(self.lambd_shape, K.get_num_alternatives())
+        self.mask_product = np.dot(self.mask.T, self.mask)
         self.group_of_alternatives = np.argmax(self.mask, axis=0)
         
     def build_mask(self, lambd_shape: int, num_alternatives: int) -> np.ndarray:
@@ -299,7 +300,7 @@ class NestedKernelCalcs(Calcs):
         """
         lambd_per_alternative = lambd[self.group_of_alternatives].flatten()
         Y_exp = Y**(1/lambd_per_alternative)
-        P_cond = Y_exp / (np.dot(Y_exp, (np.dot(self.mask.T,self.mask))))
+        P_cond = Y_exp / (np.dot(Y_exp, self.mask_product))
 
         return P_cond
 
