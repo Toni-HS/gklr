@@ -298,11 +298,7 @@ class NestedKernelCalcs(Calcs):
         Returns:
             Matriz de probabilidades condicionadas P_cond de tamaño (n_samples, num_alternatives).
         """
-        lambd_per_alternative = lambd[self.group_of_alternatives].flatten()
-        Y_exp = Y**(1/lambd_per_alternative)
-        P_cond = Y_exp / (np.dot(Y_exp, self.mask_product))
-
-        return P_cond
+        return Y / (np.dot(Y, self.mask_product))
 
 
     def calc_G(self,
