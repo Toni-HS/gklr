@@ -69,6 +69,8 @@ class Estimation(ABC):
                  params: np.ndarray,
                  loss_tol: float = 1e-06,
                  options: Optional[Dict[str, Any]] = None,
+                 bounds: Optional[list] = None,
+                 lambd_shape: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Minimize the objective function.
         
@@ -77,7 +79,9 @@ class Estimation(ABC):
             loss_tol: The tolerance for the loss function. Default: 1e-06.
             options: A dict with advance options for the optimization method. 
                 Default: None.
-            **kargs: Additional arguments for the estimation.
+            bounds: Bounds for the optimization method.
+            lambd_shape: Number of nests.
+            
         Returns:
             A dict with the results of the optimization.
         """
@@ -97,13 +101,22 @@ class Estimation(ABC):
         if self.method in SCIPY_OPTIMIZATION_METHODS:
             # Use the scipy.optimize.minimize function
             jac = self.gradient
-            res = minimize(self.objective_function, params, method=self.method, jac=jac, tol=loss_tol, options=options)
+            res = minimize(self.objective_function, 
+                           params, 
+                           method=self.method, 
+                           jac=jac, 
+                           tol=loss_tol, 
+                           options=options,
+                           bounds=bounds)
         elif self.method in CUSTOM_OPTIMIZATION_METHODS:
             # Use the custom optimization function
             optimizer = Optimizer()
             jac = self.gradient
             res = optimizer.minimize(self.objective_function, params, method=self.method, jac=jac, tol=loss_tol, options=options)
-            # Override default history values because possible minibatches store only the disaggretated loss
+            x = res["x"]
+            if n_lambda := lambd_shape:
+                x[:n_lambda] = np.clip(x[:n_lambda], bounds[0][0], bounds[0][1])
+            # Override default history values because possible minibatches store only the disaggregated loss
             self.history['loss'] = res["history"]["loss"]
             self.history['time'] = res["history"]["time"]
         else:

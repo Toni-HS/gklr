@@ -68,7 +68,7 @@ class KernelEstimator(Estimation):
             and the second element is the gradient of the objective function with 
             respect to the model parameters with shape: (num_rows_kernel_matrix * num_alternatives,)
         """
-        # Convert params to alfas and reshape them as a column vector
+        # Convert params to alpha parameters and reshape them as a matrix.
         alpha = params.reshape(self.alpha_shape)
 
         if self.prev_params is None or not np.array_equal(params, self.prev_params) or \
@@ -109,7 +109,7 @@ class KernelEstimator(Estimation):
         Args:
             params: The model parameters. Shape: (n_params,).
             indices: The indices of the samples to be used in the computation of
-                the the gradient. If 'None' all the samples will be used.
+                the gradient. If 'None' all the samples will be used.
                 Default: None.
         
         Returns:
@@ -162,7 +162,7 @@ class KernelEstimator(Estimation):
 
 
     def minimize(self,
-                 alpha_params: np.ndarray,
+                 params: np.ndarray,
                  loss_tol: float = 1e-06,
                  options: Optional[Dict[str, Any]] = None,
                  **kargs: Dict[str, Any],
@@ -170,16 +170,16 @@ class KernelEstimator(Estimation):
         """Minimize the objective function.
 
         Args:
-            alpha_params: The initial values of the model parameters. Shape: (n_params,).
+            params: The initial values of the model parameters. Shape: (n_params,).
             loss_tol: The tolerance for the loss function. Default: 1e-06.
-            options: A dict with advance options for the optimization method. 
+            options: A dict with advanced options for the optimization method. 
                 Default: None.
             **kargs: Additional arguments for the minimization function.
 
         Returns:
             A dict with the results of the optimization.
         """
-        results = super().minimize(alpha_params, loss_tol, options, **kargs)
-        # Convert alpha_params to alpha np vector and reshape them as a column vector
+        results = super().minimize(params, loss_tol, options, **kargs)
+        # Convert params to alpha np vector and reshape them as a column vector
         results["alpha_params"] = results["params"].reshape(self.alpha_shape)
         return results
