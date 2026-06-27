@@ -255,7 +255,7 @@ class MemoizeJac:
             self._value = fg[0]
 
     def __call__(self, x, *args):
-        """Returns the the function value."""
+        """Returns the function value."""
         self._compute_if_needed(x, *args)
         return self._value
 

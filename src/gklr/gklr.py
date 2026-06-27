@@ -46,17 +46,22 @@ class KernelModel:
         self.lambd_shape = None
         self.n_parameters = 0
         self.results = None
+        self.alpha_params = None
+        self.lambd_params = None
         self.nests = None
         self.nested = False
+        self.L0_cte = False
 
         if model_params == None:
             self._model_params = None
         else:
-            # TODO: Check parameters
 
-            # TODO: Check if the nests exist and in that case, check if they are correctly defined
-
+            # Check if the nests parameters are correctly defined
             if "nests" in model_params:
+
+                if "L0_cte" in model_params:
+                    self.L0_cte = model_params["L0_cte"]
+
                 msg = "The nests will be ignored."
                 nests = model_params["nests"]
                 if not isinstance(nests, list):
@@ -85,6 +90,7 @@ class KernelModel:
 
                     if not done:
                         self.nests = nests
+                        self.lambd_shape = (len(nests),)
                         self.nested = True
 
             self._model_params = model_params
@@ -92,6 +98,7 @@ class KernelModel:
         self.config = Config()
 
         logger_debug("KernelModel initialized.")  
+
 
     def _set_kernel_params(self, hyperparams: Dict[str, Any]) -> None:
         """Set the kernel parameters.
@@ -183,6 +190,16 @@ class KernelModel:
             logger_error(msg)
             raise ValueError(msg)
 
+    def get_calcs(self) -> KernelCalcs | NestedKernelCalcs:
+        """Returns the KernelCalcs or NestedKernelCalcs object.
+        
+        Returns:
+            The Calcs object.
+        """
+        if not hasattr(self, "calcs"):
+            raise RuntimeError("First you must fit the kernel model using fit().")
+        return self.calcs
+
     def clear_kernel(self, dataset: str = "train") -> None:
         """Clear the kernel matrices previously computed.
 
@@ -210,10 +227,14 @@ class KernelModel:
         return None
 
     def validate_nests(self, nests: List[List[int]], alternatives: List[int]) -> None:
-        """Validate the nests with the alternatives.
+        """Validate the nests structure using the alternatives.
+
+        If any missing, extra, or duplicate alternatives are found, the function logs
+            an error and raises a ValueError with a descriptive message.
         
         Args:
-            nests: Nests defined by the user.
+            nests: A list of lists, where each inner list contains the indices of
+                the alternatives in the corresponding nest.
             alternatives: Choice column alternatives of the dataset.
         """
         flattened_counts = Counter(num for sublist in nests for num in sublist)
@@ -249,7 +270,7 @@ class KernelModel:
         """Computes the kernel matrix for the train dataset.
 
         Processes the train dataset and creates the corresponding kernel matrix. The kernel matrix is encapsulated and
-        stored using the KernelMatrix class.
+        stored using the KernelMatrix class. If there are nests, its structure is also validated.
 
         Args:
             X: Train dataset stored in a pandas DataFrame. Shape: (n_samples, n_features)
@@ -300,7 +321,7 @@ class KernelModel:
         """Computes the kernel matrix test dataset.
 
         Processes the test dataset and creates the corresponding kernel matrix. The kernel matrix is encapsulated and
-        stored using the KernelMatrix class.
+        stored using the KernelMatrix class. If there are nests, its structure is also validated.
 
         Args:
             Z: Test dataset stored in a pandas DataFrame. Shape: (n_samples, n_features)
@@ -357,7 +378,8 @@ class KernelModel:
     ) -> None:
         """Fit the kernel model.
 
-        Perform the estimation of the kernel model and store post-estimation results.
+        Perform the estimation of the kernel model and store post-estimation results. The operations
+            performed during the fitting process and the estimator depends on the nests presence.
 
         Args:
             alpha_params: Initial value of the parameters to be optimized.
@@ -376,37 +398,44 @@ class KernelModel:
             logger_error(msg)
             raise RuntimeError(msg)
 
-        if self.nested == True:
-            self.lambd_shape = len(self.nests)
-            # Create the NestedKernelCalcs instance
-            calcs = NestedKernelCalcs(K=self._K, nests=self.nests)
-            # Create the NestedKernelEstimator instance
-            estimator = NestedKernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
-        else:
-            # Create the Calcs instance
-            calcs = KernelCalcs(K=self._K)
-            # Create the estimator instance
-            estimator = KernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
-
         if alpha_params is None:
             alpha_params = np.zeros(self.alpha_shape, dtype=DEFAULT_DTYPE)
         else:
             pass # TODO: check that there are self.n_parameters and then make a cast to self.alpha_shape
 
-        lambd_at_1 = None
         if lambd_params is None and self.nested == True:
             lambd_params = np.ones(self.lambd_shape, dtype=DEFAULT_DTYPE)
-            # Log-likelihood at one
-            lambd_at_1 = np.ones(self.lambd_shape, dtype=DEFAULT_DTYPE)
         else:
             pass
 
+        if self.nested == True:
+            # Create the nested Calcs instance
+            calcs = NestedKernelCalcs(K=self._K, nests=self.nests, L0_cte=self.L0_cte)
+            self.calcs = calcs
+            # Create the nested estimator instance
+            estimator = NestedKernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
+        else:
+            # Create the Calcs instance
+            calcs = KernelCalcs(K=self._K)
+            self.calcs = calcs
+            # Create the estimator instance
+            estimator = KernelEstimator(calcs=calcs, pmle=pmle, pmle_lambda=pmle_lambda, method=method, verbose=verbose)
+        
         # Log-likelihood at zero
         alpha_at_0 = np.zeros(self.alpha_shape, dtype=DEFAULT_DTYPE)
-        log_likelihood_at_zero = calcs.log_likelihood(alpha_at_0, lambd = lambd_at_1)
+
+        if self.nested == True:
+            # Log-likelihood at one
+            lambd_at_1 = np.ones(self.lambd_shape, dtype=DEFAULT_DTYPE)
+            log_likelihood_at_zero = calcs.log_likelihood(alpha_at_0, lambd_at_1)
+        else:
+            log_likelihood_at_zero = calcs.log_likelihood(alpha_at_0)
 
         # Initial log-likelihood
-        initial_log_likelihood = calcs.log_likelihood(alpha_params, lambd = lambd_params)
+        if self.nested == True:
+            initial_log_likelihood = calcs.log_likelihood(alpha_params, lambd_params)
+        else:
+            initial_log_likelihood = calcs.log_likelihood(alpha_params)
 
         if verbose >= 1:
             print("The estimation is going to start...\n"
@@ -421,6 +450,9 @@ class KernelModel:
         start_time = time.time()
         self.results = estimator.minimize(alpha_params.reshape(self.n_parameters), lambd_params, options=options)
         elapsed_time_sec = time.time() - start_time
+        if self.nested == True:
+            self.lambd_params = self.results.get("lambd_params", lambd_params)
+        self.alpha_params = self.results.get("alpha_params", alpha_params)
         elapsed_time_str = elapsed_time_to_str(elapsed_time_sec)
 
         if self.nested == True:
@@ -492,7 +524,7 @@ class KernelModel:
                 set (False), only in the case that a test kernel matrix is defined. Default: False.
 
         Returns:
-            Probability of the sample for each class in the model.
+            Probability of the sample for each class in the corresponding model.
         """
         if self._K is None:
             msg = "Training kernel not found or not correctly defined. Use set_kernel_test() to compute it."
@@ -512,7 +544,7 @@ class KernelModel:
                 raise RuntimeError(msg)
             if self.nested:
                 # Create the Calcs instance for nests
-                calcs = NestedKernelCalcs(K=self._K_test, nests=self.nests)
+                calcs = NestedKernelCalcs(K=self._K_test, nests=self.nests, L0_cte=self.L0_cte)
             else:
                 # Create the Calcs instance
                 calcs = KernelCalcs(K=self._K_test)
@@ -581,3 +613,4 @@ class KernelModel:
         y_predict = self.predict()
         score = np.average(y_true == y_predict)
         return score
+    
